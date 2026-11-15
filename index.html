@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>El Templo Maldito</title>
+<style>
+:root{--bg:#dfe8d6;--panel:#f3efdc;--ink:#2b3a2f;--line:#7e8d6c;--btn:#e6e0c4;--btnink:#2b3a2f;--gold:#b8782c;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101820;--panel:#17251f;--ink:#fff1ce;--line:#8b956d;--btn:#344d3d;--btnink:#fff4d5;--gold:#f4d48c;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#101820;--panel:#17251f;--ink:#fff1ce;--line:#8b956d;--btn:#344d3d;--btnink:#fff4d5;--gold:#f4d48c;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;padding:14px;background:var(--bg);color:var(--ink);font-family:system-ui,Arial,sans-serif;display:flex;justify-content:center;-webkit-user-select:none;user-select:none}
+main{width:min(960px,100%);background:var(--panel);border:2px solid var(--line);border-radius:18px;padding:14px}
+h1{text-align:center;margin:0 0 2px;color:var(--gold);font-size:clamp(20px,5vw,30px)}
+.sub{text-align:center;margin:0 0 10px;font-size:13px;opacity:.85}
+.top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:8px 12px;border-radius:10px;margin-bottom:8px;border:1px solid var(--line);font-size:14px}
+canvas{width:100%;height:auto;display:block;border:2px solid var(--line);border-radius:12px;background:#172b25;touch-action:none}
+.row{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:10px}
+button{border:1px solid var(--line);background:var(--btn);color:var(--btnink);padding:11px 15px;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;touch-action:none}
+button:active{transform:translateY(2px)}
+.primary{background:linear-gradient(#bd873f,#87572b);border-color:#f0cb7d;color:#fff4d5}
+.pad button{min-width:84px;padding:16px 14px;font-size:15px}
+[hidden]{display:none!important}
+#msg{text-align:center;min-height:22px;margin:10px 0 0;font-weight:600}
+.help{text-align:center;font-size:12px;opacity:.8;margin:6px 0 0}
+</style>
+</head>
+<body>
+<main>
+<h1>🏛️ EL TEMPLO MALDITO 🗝️</h1>
+<p class="sub">Una aventura de plataformas · ¡Encuentra el tesoro y vence al guardián!</p>
+<div class="top"><strong id="stage"></strong><strong id="coins"></strong><strong id="lives"></strong></div>
+<canvas id="g" width="900" height="480" aria-label="Juego El Templo Maldito"></canvas>
+<div class="row">
+<button id="enter" class="primary" hidden>🚪 ENTRAR</button>
+<button id="start" class="primary">▶ COMENZAR</button>
+<button id="restart">↻ REINICIAR</button>
+<button id="music">🎵 MÚSICA: OFF</button><button id="mute">🔊 EFECTOS</button>
+</div>
+<div class="row pad">
+<button id="bl">◀</button><button id="bj">⬆ SALTAR</button><button id="br">▶</button><button id="ba">✨ ESPADA</button>
+</div>
+<div id="msg"></div>
+<p class="help">Teclado: ← → mover · ESPACIO saltar (¡doble salto dentro del templo!) · F atacar · E entrar · P pausa</p>
+</main>
+<script>
+(()=>{
+const W=900,H=480,FL=410,$=id=>document.getElementById(id),cv=$('g'),c=cv.getContext('2d');
+const names=['Prólogo: El bosque encantado','Etapa 1: El puente de las monedas','Etapa 2: El corredor de pinchos','Etapa 3: Las ruinas flotantes','Etapa 4: La cámara del guardián'];
+const tips=['¡Encuentra la puerta del templo!','¡Bienvenido al templo! Pisa a las babosas para vencerlas. Ahora puedes saltar dos veces.','¡Cuidado con los pinchos! Usa el doble salto.','¡Cruza las ruinas flotantes sin caer!','¡JEFE FINAL! Esquiva sus bolas de fuego y golpéalo con la ESPADA (F).'];
+let mode='title',st=0,coins=0,lives=3,f=0,atk=0,atkCd=0,inv=0,buf=0,ban=0,winT=0,paused=false,mute=false,best=0;
+let P,plats,cns,spk,mov,en,fb,parts,B;
+const inp={l:0,r:0,j:0};
+try{best=+localStorage.getItem('templo-best')||0}catch(e){}
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const say=t=>$('msg').textContent=t;
+function hud(){$('stage').textContent=names[st];$('coins').textContent='🪙 Monedas: '+coins;$('lives').textContent='Vidas: '+'💚'.repeat(Math.max(0,lives))+'🖤'.repeat(Math.max(0,3-lives));}
+/* sonido */
+let ac;
+function snd(fr,d=.1,ty='square',v=.04,sl){if(mute)return;try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const t=ac.currentTime,o=ac.createOscillator(),g=ac.createGain();o.type=ty;o.frequency.setValueAtTime(fr,t);if(sl)o.frequency.exponentialRampToValueAtTime(sl,t+d);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.001,t+d);o.connect(g);g.connect(ac.destination);o.start();o.stop(t+d);}catch(e){}}
+function burst(x,y,col,n=12){for(let i=0;i<n;i++)parts.push({x,y,vx:(Math.random()-.5)*6,vy:Math.random()*-5,life:30+Math.random()*20,col});}
+/* música */
+let mOn=false,mT=null,mS=0;
+const mel=[392,440,523.25,659.25,587.33,523.25,440,392,349.23,392,440,523.25,493.88,440,392,329.63,392,523.25,587.33,659.25,783.99,659.25,587.33,523.25,440,523.25,587.33,523.25,440,392,349.23,392];
+function mnote(fr,t,d,v,ty){const o=ac.createOscillator(),g=ac.createGain();o.type=ty;o.frequency.setValueAtTime(fr,t);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(v,t+.025);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g);g.connect(ac.destination);o.start(t);o.stop(t+d+.03);}
+function mtick(){if(!mOn||!ac||ac.state!=='running')return;const t=ac.currentTime,i=mS%32,n=mel[i];mnote(n,t,.19,.045,'triangle');if(i%4===0)mnote([130.81,110,146.83,98][Math.floor(i/8)%4],t,.48,.055,'sine');if(i%8===4)mnote(n*2,t,.12,.018,'sine');mS++;}
+async function toggleMusic(){
+ const b=$('music');
+ if(!mOn){try{const A=window.AudioContext||window.webkitAudioContext;if(!A){say('Tu navegador no permite reproducir la música.');return;}ac=ac||new A();await ac.resume();mOn=true;mS=0;mtick();mT=setInterval(mtick,220);b.textContent='🎵 MÚSICA: ON';say('🎶 Música del templo activada.');}catch(e){say('No se pudo iniciar el audio. Inténtalo otra vez.');}}
+ else{mOn=false;clearInterval(mT);b.textContent='🎵 MÚSICA: OFF';say('Música apagada.');}
+}
+function resetP(x=40){P={x,y:350,w:34,h:58,vx:0,vy:0,ground:true,face:1,coy:0,jumps:0,on:null,jt:99};}
+function setup(){
+ plats=[];cns=[];spk=[];mov=[];en=[];fb=[];parts=[];
+ const F={x:0,y:FL,w:900,h:70};
+ if(st===0){plats=[F];for(let i=0;i<5;i++)cns.push({x:130+i*80,y:360-(i%2)*34});resetP(50);}
+ if(st===1){
+  plats=[F,{x:180,y:340,w:130,h:18},{x:370,y:295,w:130,h:18},{x:575,y:340,w:130,h:18}];
+  for(let i=0;i<12;i++)cns.push({x:120+i*58,y:i%3===0?300:i%3===1?260:330});
+  [[260,120,420],[520,480,800],[700,600,860]].forEach(a=>en.push({x:a[0],y:FL-26,w:34,h:26,dir:1,min:a[1],max:a[2]}));
+  resetP();
+ }
+ if(st===2){
+  plats=[F];
+  for(let i=0;i<8;i++)spk.push({x:135+i*92,y:FL-30,w:28,h:30});
+  for(let i=0;i<8;i++)cns.push({x:149+i*92,y:300});
+  resetP();
+ }
+ if(st===3){
+  plats=[{x:0,y:FL,w:145,h:70},{x:205,y:350,w:125,h:18},{x:385,y:300,w:125,h:18},{x:565,y:345,w:120,h:18},{x:755,y:FL,w:145,h:70}];
+  mov=[{x:145,y:375,w:65,h:14,base:375,amp:65,sp:.035,ph:0,py:375},{x:690,y:320,w:65,h:14,base:320,amp:45,sp:.045,ph:2,py:320}];
+  for(let i=0;i<7;i++)cns.push({x:190+i*95,y:i%2?275:320});
+  resetP(30);
+ }
+ if(st===4){plats=[F];B={x:680,y:300,hp:10,max:10,dir:-1,inv:0,fl:0,t:0,dead:0};resetP(90);}
+ cns.forEach(a=>a.got=false);
+ ban=140;$('enter').hidden=true;hud();say(tips[st]);
+}
+function next(){st++;if(st>4){return;}snd(520,.25,'triangle',.06,880);setup();}
+function newGame(){st=0;coins=0;lives=3;inv=0;mode='play';$('start').textContent='▶ COMENZAR';setup();}
+function hurt(fall){
+ if(inv>0&&!fall)return;lives--;inv=90;snd(180,.3,'sawtooth',.06,60);burst(P.x+17,P.y+25,'#e0574f',16);hud();
+ if(lives<=0){mode='over';$('start').textContent='▶ JUGAR DE NUEVO';say('¡Se acabaron las vidas! Pulsa JUGAR DE NUEVO.');return;}
+ if(fall)resetP(st===0?50:35);else{P.vy=-7;P.x=clamp(P.x-P.face*35,0,W-P.w);}
+ say('¡Ay! Perdiste una vida. ¡Sigue intentándolo!');
+}
+function attack(){
+ if(mode!=='play'||atkCd>0)return;atk=14;atkCd=24;snd(600,.12,'sawtooth',.04,200);
+ if(st===4&&!B.dead){
+  const dx=B.x+38-(P.x+17);
+  if(dx*P.face>0&&Math.abs(dx)<125&&Math.abs(P.y-B.y)<110&&B.inv===0){B.hp--;B.inv=22;B.fl=14;snd(120,.2,'square',.07,60);burst(B.x+38,B.y+40,'#9dfaff',14);}
+  fb=fb.filter(b=>{const d=b.x-(P.x+17);if(d*P.face>0&&Math.abs(d)<100){burst(b.x,b.y,'#ffb04f',8);return false;}return true;});
+ }
+}
+function press(){buf=8;}
+function step(){
+ f++;if(atk>0)atk--;if(atkCd>0)atkCd--;if(inv>0)inv--;if(ban>0)ban--;
+ parts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.25;p.life--;});parts=parts.filter(p=>p.life>0);
+ if(mode!=='play'||paused)return;
+ if(winT>0){if(--winT===0){mode='win';snd(660,.5,'triangle',.07,1320);try{if(coins>best){best=coins;localStorage.setItem('templo-best',best);}}catch(e){}say('🏆 ¡FELICIDADES! Has vencido al guardián y liberado el templo.');}return;}
+ const p=P,dir=inp.r-inp.l;p.vx=dir*3.6;if(dir)p.face=dir;p.x=clamp(p.x+p.vx,0,W-p.w);
+ mov.forEach(a=>{a.py=a.y;a.ph+=a.sp;a.y=a.base+Math.sin(a.ph)*a.amp;});
+ if(p.on&&mov.includes(p.on))p.y+=p.on.y-p.on.py;
+ if(p.ground){p.coy=7;p.jumps=0;}else if(p.coy>0)p.coy--;
+ if(buf>0){buf--;
+  if(p.coy>0){p.vy=-11.6;p.coy=0;p.jumps=1;p.jt=0;p.ground=false;buf=0;snd(330,.12,'square',.04,620);}
+  else if(st>0&&p.jumps<2){p.vy=-10.4;p.jumps=2;p.jt=0;buf=0;burst(p.x+17,p.y+58,'#cfe9d0',8);snd(440,.12,'square',.04,780);}}
+ p.jt++;if(!inp.j&&p.vy<-4&&p.jt>3)p.vy=-4;
+ p.vy=Math.min(p.vy+.55,13);p.y+=p.vy;p.ground=false;p.on=null;
+ const pb=p.y+p.h,prev=pb-p.vy;
+ [...plats,...mov].forEach(a=>{if(p.x+p.w>a.x+4&&p.x<a.x+a.w-4&&p.vy>=0&&prev<=Math.max(a.y,a.py||a.y)+8&&pb>=a.y){p.y=a.y-p.h;p.vy=0;p.ground=true;p.on=a;}});
+ if(st>0&&st<4)cns.forEach(a=>{if(!a.got&&Math.abs(p.x+17-a.x)<24&&Math.abs(p.y+28-a.y)<36){a.got=true;coins++;hud();snd(900,.1,'triangle',.05,1500);burst(a.x,a.y,'#ffe58b',6);}});
+ if(st===0){cns.forEach(a=>{if(!a.got&&Math.abs(p.x+17-a.x)<24&&Math.abs(p.y+28-a.y)<36){a.got=true;coins++;hud();snd(900,.1,'triangle',.05,1500);burst(a.x,a.y,'#ffe58b',6);}});
+  const nd=p.x>570&&p.x<800;$('enter').hidden=!nd;}
+ if(st===1)en.forEach(e=>{e.x+=e.dir*1.2;if(e.x<e.min||e.x>e.max)e.dir*=-1;
+  if(!e.dead&&p.x+p.w>e.x+3&&p.x<e.x+e.w-3&&p.y+p.h>e.y&&p.y<e.y+e.h){if(p.vy>0&&prev<=e.y+10){e.dead=1;p.vy=-8.5;p.jumps=1;coins+=2;hud();snd(260,.15,'square',.06,90);burst(e.x+17,e.y+10,'#7fd26a',12);}else hurt();}});
+ en=en.filter(e=>!e.dead);
+ if(st===2&&spk.some(s=>p.x+p.w>s.x+6&&p.x<s.x+s.w-6&&p.y+p.h>s.y+10))hurt();
+ if(st===4&&!B.dead){
+  const sp=1+(1-B.hp/B.max)*1.2;B.x+=B.dir*1.3*sp;if(B.x<480||B.x>780)B.dir*=-1;if(B.inv>0)B.inv--;if(B.fl>0)B.fl--;B.t++;
+  if(B.t%(B.hp>5?130:85)===0){fb.push({x:B.x,y:FL-24,vx:(p.x<B.x?-1:1)*(B.hp>5?3.8:5)});snd(200,.25,'sawtooth',.05,110);}
+  if(p.x+p.w>B.x-6&&p.x<B.x+82&&p.y+p.h>B.y-10)hurt();
+  if(B.hp<=0){B.dead=1;winT=70;fb=[];burst(B.x+38,B.y+40,'#e6b96b',40);snd(90,.7,'sawtooth',.08,30);say('¡El guardián ha sido vencido!');}
+ }
+ fb.forEach(b=>{b.x+=b.vx;if(Math.hypot(b.x-(p.x+17),b.y-(p.y+30))<26)hurt();});fb=fb.filter(b=>b.x>-30&&b.x<W+30);
+ if(p.y>H)hurt(true);
+ if(st>=1&&st<=3&&p.x>=W-p.w-2)next();
+}
+/* dibujo */
+const R=(x,y,w,h,col)=>{c.fillStyle=col;c.fillRect(x,y,w,h)};
+const C=(x,y,r,col)=>{c.fillStyle=col;c.beginPath();c.arc(x,y,r,0,7);c.fill()};
+function bg(){
+ const g=c.createLinearGradient(0,0,0,H);
+ if(st===0){g.addColorStop(0,'#142b35');g.addColorStop(1,'#284b36');}else if(st===4){g.addColorStop(0,'#261d38');g.addColorStop(1,'#5a3035');}else{g.addColorStop(0,'#222d3a');g.addColorStop(1,'#514536');}
+ c.fillStyle=g;c.fillRect(0,0,W,H);
+ for(let i=0;i<36;i++){c.globalAlpha=.5+.5*Math.sin(f*.04+i);C((i*137+30)%W,(i*71+22)%300,1.5+(i%3)*.6,st===4?'#e6b96b':'#b7d9a0');}c.globalAlpha=1;
+ if(st===0){
+  C(740,85,42,'#e9dca4');C(758,72,40,'#1b3440');
+  for(let i=0;i<14;i++){const x=i*75-20;R(x+22,145,22,270,'#182c25');C(x+32,145,55,'#214b35');C(x+4,177,34,'#2c5a3c');}
+  R(0,FL,W,70,'#5d5039');R(0,FL,W,9,'#8c7850');
+  R(610,205,235,205,'#77715b');R(590,185,275,30,'#b4a17a');R(625,165,205,22,'#958566');
+  for(let x=635;x<830;x+=48)R(x,225,15,185,'#c1ae82');
+  R(700,300,70,110,'#211d24');R(710,310,50,100,'#d5b96f');R(682,288,106,12,'#d9c18a');
+  c.fillStyle='#f4e5b8';c.font='bold 20px Arial';c.fillText('TEMPLO',685,150);
+ }else{
+  for(let i=0;i<10;i++){R(i*100+10,55,10,350,'#71624b');R(i*100+10,55,70,12,'#a08a65');}
+  R(0,FL,W,70,'#5c5144');R(0,FL,W,8,'#a08a65');
+  if(st===4)for(let i=0;i<5;i++){C(120+i*170,125,22,'#8e643e');C(120+i*170,125,10+Math.sin(f*.1+i)*2,'#f0c86d');}
+ }
+}
+function drawP(){
+ const x=P.x,y=P.y;if(inv>0&&Math.floor(f/5)%2===0)return;
+ c.globalAlpha=.25;C(x+18,y+57,19,'#000');c.globalAlpha=1;
+ R(x+7,y+42,9,13,'#35435b');R(x+21,y+42,9,13,'#35435b');R(x+4,y+52,14,6,'#5b392b');R(x+19,y+52,14,6,'#5b392b');
+ R(x-2,y+22,11,23,'#a85d32');R(x,y+25,8,13,'#e3a34e');
+ R(x+7,y+20,22,25,'#397b79');R(x+6,y+19,24,5,'#f0c45d');R(x+25,y+20,8,17,'#e0a94e');
+ C(x+18,y+12,13,'#f0bd91');R(x+5,y+3,26,9,'#56352c');R(x+6,y+8,6,8,'#56352c');R(x+24,y+7,7,7,'#56352c');
+ C(x+14,y+13,1.7,'#2a2630');C(x+22,y+13,1.7,'#2a2630');
+ c.save();c.translate(x+17,0);c.scale(P.face,1);c.translate(-17,0);
+ if(atk>0){c.translate(31,y+31);c.rotate(-.55+(14-atk)*.09);c.shadowColor='#8ff7ff';c.shadowBlur=18;R(0,-4,46,8,'#a9faff');R(0,-3,36,5,'#fff7c5');R(-5,-7,8,14,'#b8793c');}
+ else{R(28,y+32,5,17,'#c7d3d1');R(26,y+32,9,3,'#d5a64e');}
+ c.restore();
+}
+function overlay(t,s){c.fillStyle='#000a';c.fillRect(0,0,W,H);c.textAlign='center';c.fillStyle='#f4d48c';c.font='bold 44px Arial';c.fillText(t,W/2,210);c.fillStyle='#fff1ce';c.font='20px Arial';s.split('\n').forEach((l,i)=>c.fillText(l,W/2,255+i*28));c.textAlign='left';}
+function render(){
+ c.clearRect(0,0,W,H);bg();
+ plats.forEach(a=>{R(a.x,a.y,a.w,a.h,'#8b7856');R(a.x,a.y,a.w,5,'#c3a77a');});
+ mov.forEach(a=>{R(a.x,a.y,a.w,a.h,'#8e9a79');R(a.x,a.y,a.w,4,'#d3d89b');});
+ cns.forEach(a=>{if(!a.got){const s=Math.abs(Math.cos(f*.06+a.x));C(a.x,a.y,11,'#d79b2d');C(a.x,a.y,7*s+1,'#ffe58b');}});
+ spk.forEach(a=>{c.fillStyle='#c8c9c7';c.beginPath();c.moveTo(a.x,a.y+a.h);c.lineTo(a.x+a.w/2,a.y);c.lineTo(a.x+a.w,a.y+a.h);c.fill();R(a.x,a.y+a.h-4,a.w,4,'#747d83');});
+ en.forEach(e=>{c.fillStyle='#5fb454';c.beginPath();c.ellipse(e.x+17,e.y+16,19,12,0,Math.PI,0);c.fill();R(e.x-2,e.y+16,38,10,'#4a9a45');C(e.x+11,e.y+14,3.5,'#fff');C(e.x+24,e.y+14,3.5,'#fff');C(e.x+12+e.dir,e.y+14,1.5,'#111');C(e.x+25+e.dir,e.y+14,1.5,'#111');});
+ if(st===4&&B&&!B.dead){
+  if(B.fl>0)c.globalAlpha=.5;
+  C(B.x+38,B.y+25,48,'#5c536b');R(B.x+5,B.y+25,66,75,'#756b80');R(B.x+12,B.y+80,20,24,'#4d4659');R(B.x+47,B.y+80,20,24,'#4d4659');
+  R(B.x-8,B.y+35,18,48,'#8a7d90');R(B.x+68,B.y+35,18,48,'#8a7d90');C(B.x+25,B.y+20,6,'#ffdf73');C(B.x+51,B.y+20,6,'#ffdf73');c.globalAlpha=1;
+  c.fillStyle='#fff0cf';c.font='bold 17px Arial';c.fillText('VIDA DEL JEFE FINAL',540,53);R(540,65,260,18,'#eee5d5');R(540,65,260*Math.max(0,B.hp/B.max),18,'#b94e55');
+  c.font='bold 20px Arial';c.fillText('GUARDIÁN DE PIEDRA',B.x-40,B.y-40);
+ }
+ fb.forEach(b=>{c.shadowColor='#ff8a2f';c.shadowBlur=16;C(b.x,b.y,11,'#ff8a2f');C(b.x,b.y,5,'#ffe08a');c.shadowBlur=0;});
+ drawP();
+ parts.forEach(p=>{c.globalAlpha=clamp(p.life/30,0,1);R(p.x,p.y,4,4,p.col);});c.globalAlpha=1;
+ if(ban>0&&mode==='play'){c.globalAlpha=Math.min(1,ban/40);c.textAlign='center';c.fillStyle='#000a';c.fillRect(W/2-290,18,580,40);c.fillStyle='#f4d48c';c.font='bold 22px Arial';c.fillText(names[st],W/2,46);c.textAlign='left';c.globalAlpha=1;}
+ if(mode==='title')overlay('EL TEMPLO MALDITO','Pulsa COMENZAR (o ESPACIO) para jugar'+(best?'\nMejor puntuación: '+best+' monedas':''));
+ if(mode==='over')overlay('FIN DEL JUEGO','Monedas: '+coins+'\nPulsa ESPACIO para intentarlo otra vez');
+ if(mode==='win')overlay('🏆 ¡VICTORIA! 🏆','Liberaste el templo con '+coins+' monedas\nMejor puntuación: '+best+'\nPulsa ESPACIO para jugar otra vez');
+ if(paused&&mode==='play')overlay('PAUSA','Pulsa P para continuar');
+}
+/* controles */
+function enter(){if(mode==='play'&&st===0&&P.x>570&&P.x<800){next();}}
+const KM={ArrowLeft:'l',a:'l',ArrowRight:'r',d:'r',' ':'j',ArrowUp:'j',w:'j'};
+addEventListener('keydown',e=>{
+ const k=e.key.length>1?e.key:e.key.toLowerCase();
+ if(['ArrowLeft','ArrowRight','ArrowUp',' '].includes(k))e.preventDefault();
+ if(mode!=='play'&&(k===' '||k==='Enter')){if(!e.repeat)newGame();return;}
+ if(KM[k]){if(KM[k]==='j'&&!inp.j)press();inp[KM[k]]=1;}
+ if(k==='e')enter();if(k==='f'||k==='x')attack();if(k==='p')paused=!paused;
+});
+addEventListener('keyup',e=>{const k=e.key.length>1?e.key:e.key.toLowerCase();if(KM[k])inp[KM[k]]=0;});
+addEventListener('blur',()=>{inp.l=inp.r=inp.j=0;});
+function hold(id,key,onDown){const b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture&&b.setPointerCapture(e.pointerId);if(key){if(key==='j'&&!inp.j)press();inp[key]=1;}if(onDown)onDown();});
+ ['pointerup','pointercancel','lostpointercapture'].forEach(ev=>b.addEventListener(ev,()=>{if(key)inp[key]=0;}));}
+hold('bl','l');hold('br','r');hold('bj','j');hold('ba',null,attack);
+$('enter').onclick=enter;
+$('start').onclick=()=>{if(mode!=='play')newGame();};
+$('restart').onclick=newGame;
+$('mute').onclick=()=>{mute=!mute;$('mute').textContent=mute?'🔇 EFECTOS':'🔊 EFECTOS';};
+$('music').onclick=toggleMusic;
+document.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>b.blur()));
+document.addEventListener('visibilitychange',()=>{if(!ac)return;if(document.hidden){ac.suspend();}else{ac.resume();}});
+document.addEventListener('contextmenu',e=>e.preventDefault());
+/* bucle */
+let last=0,acc=0;
+function loop(t){if(!last)last=t;acc+=Math.min(100,t-last);last=t;while(acc>=16.67){step();acc-=16.67;}render();requestAnimationFrame(loop);}
+setup();say('Pulsa COMENZAR para empezar la aventura.');requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
